@@ -1,1 +1,8 @@
 build/
+*.o
+*.a
+*.so
+CMakeCache.txt
+CMakeFiles/
+*.bin
+*.img
