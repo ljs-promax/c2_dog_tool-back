@@ -868,11 +868,11 @@ bool JointControl::changeNodeId(uint8_t newCanId, int timeoutMs) {
     return false;
 }
 
-void JointControl::enable(bool on) {
+bool JointControl::enable(bool on) {
     if (!m_network)
-        return;
+        return false;
     auto pkt = encodeBatch({makeModeFrame(3), makeEnableFrame(on)});
-    m_network->send(pkt.data(), pkt.size());
+    return m_network->send(pkt.data(), pkt.size());
 }
 
 void JointControl::setControlMode(uint8_t mode) {

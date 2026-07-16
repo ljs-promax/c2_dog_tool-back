@@ -1022,31 +1022,17 @@ bool ProdTestServer::ensureMotorTestRunning(uint8_t canCh, uint8_t canId, uint16
             return false;
         }
 
-        if (!newCtx.ctrl->setControlModeAndWait(3, 1000)) {
-            std::printf("[MotorEnable] ch=%u id=%u mode ack timeout\n",
+        newCtx.ctrl->drainPendingPackets(16, 20);
+        if (!newCtx.ctrl->enable(true)) {
+            std::printf("[MotorEnable] ch=%u id=%u enable send failed\n",
                         static_cast<unsigned>(canCh),
                         static_cast<unsigned>(canId));
-            TestLogger::instance().logTestResult("motor_enable", false, "mode ack timeout");
+            TestLogger::instance().logTestResult("motor_enable", false, "enable send failed");
             return false;
         }
-        if (!newCtx.ctrl->enableAndWait(true, 1000)) {
-            std::printf("[MotorEnable] ch=%u id=%u enable ack timeout\n",
-                        static_cast<unsigned>(canCh),
-                        static_cast<unsigned>(canId));
-            TestLogger::instance().logTestResult("motor_enable", false, "enable ack timeout");
-            return false;
-        }
-        uint16_t controlWord = 0;
-        if (newCtx.ctrl->readSdoU16(0x2002, 0x00, controlWord, 500)) {
-            std::printf("[MotorEnable] ch=%u id=%u enable ack ok control_word=0x%04X\n",
-                        static_cast<unsigned>(canCh),
-                        static_cast<unsigned>(canId),
-                        controlWord);
-        } else {
-            std::printf("[MotorEnable] ch=%u id=%u enable ack ok control_word read timeout\n",
-                        static_cast<unsigned>(canCh),
-                        static_cast<unsigned>(canId));
-        }
+        std::printf("[MotorEnable] ch=%u id=%u mode+enable sent without ack wait\n",
+                    static_cast<unsigned>(canCh),
+                    static_cast<unsigned>(canId));
         newCtx.enabled = true;
         newCtx.cmd = cmd;
         newCtx.lastFeedback.res = 1;

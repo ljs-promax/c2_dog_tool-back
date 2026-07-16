@@ -142,7 +142,7 @@ public:
     }
 
     // 功能接口
-    void enable(bool on);
+    bool enable(bool on);
     void setControlMode(uint8_t mode);
     bool setControlModeAndWait(uint8_t mode, int timeoutMs = 1500);
     bool enableAndWait(bool on, int timeoutMs = 1500);
