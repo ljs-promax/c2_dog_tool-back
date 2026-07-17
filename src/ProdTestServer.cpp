@@ -32,8 +32,8 @@ static constexpr const char *kSbusRxPort = "/dev/ttyS2";
 static constexpr int kSbusSendIntervalMs = 100;
 static constexpr int kSbusMaxFrames = 10;
 static constexpr size_t kSbusFrameSize = 25;
-static constexpr int kMotorControlPeriodMs = 1;
-static constexpr int kMotorFeedbackPollTimeoutMs = 1;
+static constexpr int kMotorControlPeriodMs = 100;
+static constexpr int kMotorFeedbackPollTimeoutMs = 100;
 
 static uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {
     crc = ~crc;
@@ -1022,15 +1022,14 @@ bool ProdTestServer::ensureMotorTestRunning(uint8_t canCh, uint8_t canId, uint16
             return false;
         }
 
-        newCtx.ctrl->drainPendingPackets(16, 20);
         if (!newCtx.ctrl->enable(true)) {
-            std::printf("[MotorEnable] ch=%u id=%u enable send failed\n",
+            std::printf("[MotorEnable] ch=%u id=%u mode+enable send failed\n",
                         static_cast<unsigned>(canCh),
                         static_cast<unsigned>(canId));
-            TestLogger::instance().logTestResult("motor_enable", false, "enable send failed");
+            TestLogger::instance().logTestResult("motor_enable", false, "mode+enable send failed");
             return false;
         }
-        std::printf("[MotorEnable] ch=%u id=%u mode+enable sent without ack wait\n",
+        std::printf("[MotorEnable] ch=%u id=%u mode+enable sent as separate UDP packets without ack wait\n",
                     static_cast<unsigned>(canCh),
                     static_cast<unsigned>(canId));
         newCtx.enabled = true;
@@ -1164,53 +1163,32 @@ int ProdTestServer::handleEncoderCal(CS_ComFrame* req, CS_ComFrame* resp) {
     uint8_t canCh = req->buffer[0];
     uint8_t canId = req->buffer[1];
 
-    bool usingActiveMotorCtx = false;
-    {
-        std::lock_guard<std::mutex> lock(m_motorMutex);
-        usingActiveMotorCtx = m_motorCtx.ctrl && m_motorCtx.canCh == canCh &&
-                              m_motorCtx.canId == canId && m_motorTestActive.load();
-    }
-
-    if (!usingActiveMotorCtx) {
-        TestLogger::instance().stopConflictingServices();
-    }
-
-    JointId jid;
-    jid.board_id = DefaultConfig::GATEWAY_BOARD_ID;
-    jid.can_ch = canCh;
-    jid.can_id = canId;
-
-    JointCfg cfg;
-    cfg.canfd = 1;
-    cfg.extend_id = 0;
-    cfg.bitrate_switch = 1;
-
-    JointControl calCtrl(DefaultConfig::GATEWAY_IP, DefaultConfig::REMOTE_PORT, jid, cfg);
-    if (!calCtrl.init()) {
-        TestLogger::instance().logTestResult("encoder_cal", false, "init failed");
+    std::unique_lock<std::mutex> lock(m_motorMutex);
+    if (!m_motorCtx.ctrl || !m_motorCtx.enabled || !m_motorTestActive.load() ||
+        m_motorCtx.canCh != canCh || m_motorCtx.canId != canId) {
+        lock.unlock();
+        std::printf("[Encoder Cal] rejected ch=%u id=%u: motor is not enabled by motor_en\n",
+                    static_cast<unsigned>(canCh),
+                    static_cast<unsigned>(canId));
+        TestLogger::instance().logTestResult("encoder_cal", false, "motor not enabled");
         sendResponse(&m_lastClient, ProdTestCmd::MOTOR_ENCODER_CAL, req->header.frame_id, &out, sizeof(out), out.res);
         return 0;
     }
 
-    if (!usingActiveMotorCtx) {
-        calCtrl.setControlMode(3);
-        calCtrl.enable(true);
-        calCtrl.drainPendingPackets(16, 20);
-    } else {
-        calCtrl.drainPendingPackets(16, 20);
-    }
+    JointControl* calCtrl = m_motorCtx.ctrl.get();
 
-    if (!calCtrl.sendPacket(calCtrl.makeEncoderCalcFrame())) {
+    if (!calCtrl->sendPacket(calCtrl->makeEncoderCalcFrame())) {
+        lock.unlock();
         TestLogger::instance().logTestResult("encoder_cal", false, "calibration send failed");
         sendResponse(&m_lastClient, ProdTestCmd::MOTOR_ENCODER_CAL, req->header.frame_id, &out, sizeof(out), out.res);
         return 0;
     }
 
-    bool received = calCtrl.receiveSdoAck(0x2002, 0x00, 1000);
+    bool received = calCtrl->receiveSdoAck(0x2002, 0x00, 1000);
     if (received) {
         uint16_t errorCode = 0;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (calCtrl.readSdoU16(0x2000, 0x00, errorCode, 500)) {
+        if (calCtrl->readSdoU16(0x2000, 0x00, errorCode, 500)) {
             std::printf("[Encoder Cal] ack received error_code=0x%04X\n", errorCode);
         } else {
             std::printf("[Encoder Cal] ack received error_code read timeout\n");
@@ -1219,15 +1197,9 @@ int ProdTestServer::handleEncoderCal(CS_ComFrame* req, CS_ComFrame* resp) {
         out.res = 0;
         TestLogger::instance().logTestResult("encoder_cal", true, "calibration ack received");
     } else {
-        if (usingActiveMotorCtx) {
-            out.res = 0;
-            std::printf("[Encoder Cal] active motor calibration sent, ack timeout ignored\n");
-            TestLogger::instance().logTestResult("encoder_cal", true,
-                                                 "active motor calibration sent, ack timeout ignored");
-        } else {
-            TestLogger::instance().logTestResult("encoder_cal", false, "calibration ack timeout");
-        }
+        TestLogger::instance().logTestResult("encoder_cal", false, "calibration ack timeout");
     }
+    lock.unlock();
 
     sendResponse(&m_lastClient, ProdTestCmd::MOTOR_ENCODER_CAL, req->header.frame_id, &out, sizeof(out), out.res);
     return 0;

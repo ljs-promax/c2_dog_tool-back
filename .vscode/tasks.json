@@ -2,13 +2,13 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build CMake",
+            "label": "Build AArch64",
             "type": "shell",
-            "command": "cmake",
-            "args": [
-                "--build",
-                "${workspaceFolder}/build"
-            ],
+            "command": "${workspaceFolder}/build.sh",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$gcc",
             "group": {
                 "kind": "build",
                 "isDefault": true

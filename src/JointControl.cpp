@@ -610,6 +610,10 @@ bool JointControl::receiveSdoAck(uint16_t index,
     }
 
     while (true) {
+        if (takeCachedSdoAck(index, subIndex, expectedRespCanId, altExpectedRespCanId)) {
+            return true;
+        }
+
         auto now = std::chrono::steady_clock::now();
         int elapsed =
             std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
@@ -644,6 +648,22 @@ bool JointControl::receiveSdoAck(uint16_t index,
             if (isSdoResponseFrame(f, expectedRespCanId, altExpectedRespCanId)) {
                 if (isSdoAckFrame(f, index, subIndex, expectedRespCanId, altExpectedRespCanId)) {
                     return true;
+                }
+                uint16_t respIndex = static_cast<uint16_t>(f.data[1]) |
+                                     (static_cast<uint16_t>(f.data[2]) << 8);
+                if (f.data[0] == 0x80 || respIndex == index) {
+                    std::printf("[SDO RX] wait index=0x%04X sub=0x%02X got can_id=0x%03X "
+                                "cs=0x%02X index=0x%04X sub=0x%02X data=%02X %02X %02X %02X\n",
+                                index,
+                                subIndex,
+                                static_cast<unsigned>(f.header.id),
+                                f.data[0],
+                                respIndex,
+                                f.data[3],
+                                f.data[4],
+                                f.data[5],
+                                f.data[6],
+                                f.data[7]);
                 }
                 cacheSdoResponse(f);
             }
@@ -871,8 +891,14 @@ bool JointControl::changeNodeId(uint8_t newCanId, int timeoutMs) {
 bool JointControl::enable(bool on) {
     if (!m_network)
         return false;
-    auto pkt = encodeBatch({makeModeFrame(3), makeEnableFrame(on)});
-    return m_network->send(pkt.data(), pkt.size());
+
+    auto modePkt = encodeBatch({makeModeFrame(3)});
+    if (!m_network->send(modePkt.data(), modePkt.size())) {
+        return false;
+    }
+
+    auto enablePkt = encodeBatch({makeEnableFrame(on)});
+    return m_network->send(enablePkt.data(), enablePkt.size());
 }
 
 void JointControl::setControlMode(uint8_t mode) {

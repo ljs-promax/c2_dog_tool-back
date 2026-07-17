@@ -210,10 +210,14 @@ int dog_test_cli() {
 
             JointControl ctrl(DefaultConfig::GATEWAY_IP, DefaultConfig::REMOTE_PORT, jid, cfg);
             if (ctrl.init()) {
-                ctrl.enable(true);
-                std::cout << "[PASS] 电机使能成功 (ch=" << ch << ", id=" << id << ")\n";
+                if (!ctrl.enable(true)) {
+                    std::cout << "[FAIL] 电机使能发送失败\n";
+                    TestLogger::instance().logTestResult("motor_enable", false, "mode+enable send failed");
+                    continue;
+                }
+                std::cout << "[PASS] 电机使能已发送 (ch=" << ch << ", id=" << id << ")\n";
                 TestLogger::instance().logTestResult("motor_enable", true,
-                    "ch=" + std::to_string(ch) + " id=" + std::to_string(id));
+                    "ch=" + std::to_string(ch) + " id=" + std::to_string(id) + " sent");
             } else {
                 std::cout << "[FAIL] 电机使能失败\n";
                 TestLogger::instance().logTestResult("motor_enable", false, "init failed");
@@ -238,7 +242,11 @@ int dog_test_cli() {
 
             JointControl ctrl(DefaultConfig::GATEWAY_IP, DefaultConfig::REMOTE_PORT, jid, cfg);
             if (ctrl.init()) {
-                ctrl.enable(true);
+                if (!ctrl.enable(true)) {
+                    std::cout << "[FAIL] 电机使能发送失败\n";
+                    TestLogger::instance().logTestResult("motor_set", false, "mode+enable send failed");
+                    continue;
+                }
                 ctrl.command().kp = kp;
                 ctrl.command().kd = kd;
                 ctrl.command().position = pos;

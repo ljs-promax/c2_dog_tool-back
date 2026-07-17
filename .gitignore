@@ -1,4 +1,5 @@
 build/
+build-aarch64/
 *.o
 *.a
 *.so
