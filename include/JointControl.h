@@ -146,6 +146,7 @@ public:
     void setControlMode(uint8_t mode);
     bool setControlModeAndWait(uint8_t mode, int timeoutMs = 1500);
     bool enableAndWait(bool on, int timeoutMs = 1500);
+    bool clearErrorAndWait(int timeoutMs = 1000);
     void setControlPdoBase(uint32_t base);
     uint32_t controlPdoBase() const;
     bool sendControl();
@@ -175,6 +176,7 @@ private:
     CANHeader buildCanHeader(uint32_t can_id, uint8_t dlc) const;
 
     Net2CanFrameWrapper makeControlFrame();
+    Net2CanFrameWrapper makeControlWordFrame(uint16_t controlWord);
     Net2CanFrameWrapper makeEnableFrame(bool on);
     Net2CanFrameWrapper makeModeFrame(uint8_t mode);
     Net2CanFrameWrapper makeWriteU8Frame(uint16_t index, uint8_t subIndex, uint8_t value) const;

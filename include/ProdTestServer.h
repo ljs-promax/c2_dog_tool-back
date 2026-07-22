@@ -73,6 +73,7 @@ private:
     // ===== Command Handlers =====
     int handleMotorEnable(CS_ComFrame* req, CS_ComFrame* resp);
     int handleMotorDisable(CS_ComFrame* req, CS_ComFrame* resp);
+    int handleMotorErrorClear(CS_ComFrame* req, CS_ComFrame* resp);
     int handleMotorSetParam(CS_ComFrame* req, CS_ComFrame* resp);
     int handleEncoderCal(CS_ComFrame* req, CS_ComFrame* resp);
     int handleEncoderLoss(CS_ComFrame* req, CS_ComFrame* resp);
@@ -144,6 +145,7 @@ private:
     std::atomic<bool> m_networkActive;
     std::map<uint16_t, CmdHandler> m_handlers;
     std::mutex m_motorMutex;
+    std::mutex m_motorIoMutex;
     std::mutex m_sendMutex;
     std::mutex m_queueMutex;
     std::mutex m_uploadQueueMutex;

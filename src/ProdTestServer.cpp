@@ -913,6 +913,9 @@ void ProdTestServer::registerHandlers() {
     m_handlers[MOTOR_TEST_DISABLE] = [this](CS_ComFrame* req, CS_ComFrame* resp) {
         return handleMotorDisable(req, resp);
     };
+    m_handlers[MOTOR_ERROR_CLEAR] = [this](CS_ComFrame* req, CS_ComFrame* resp) {
+        return handleMotorErrorClear(req, resp);
+    };
     m_handlers[MOTOR_SN_RW] = [this](CS_ComFrame* req, CS_ComFrame* resp) {
         return handleMotorSnRw(req, resp);
     };
@@ -1086,6 +1089,72 @@ int ProdTestServer::handleMotorDisable(CS_ComFrame* req, CS_ComFrame* resp) {
     MotorDisableResponse out{};
     out.res = 0;
     sendResponse(&m_lastClient, ProdTestCmd::MOTOR_TEST_DISABLE, req->header.frame_id, &out, sizeof(out), 0);
+    return 0;
+}
+
+int ProdTestServer::handleMotorErrorClear(CS_ComFrame* req, CS_ComFrame* resp) {
+    MotorErrorClearResponse out{};
+    out.res = -1;
+    out.error_code = 0xFFFF;
+
+    if (req->header.data_len < 2) {
+        sendError(&m_lastClient, ProdTestCmd::MOTOR_ERROR_CLEAR, req->header.frame_id,
+                  "Invalid motor clear-error request");
+        return -1;
+    }
+
+    const uint8_t canCh = req->buffer[0];
+    const uint8_t canId = req->buffer[1];
+    bool clearAck = false;
+    bool errorRead = false;
+
+    std::unique_lock<std::mutex> ioLock(m_motorIoMutex);
+    JointControl* ctrl = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_motorMutex);
+        if (m_motorCtx.ctrl && m_motorCtx.enabled && m_motorTestActive.load() &&
+            m_motorCtx.canCh == canCh && m_motorCtx.canId == canId) {
+            ctrl = m_motorCtx.ctrl.get();
+        }
+    }
+
+    if (!ctrl) {
+        ioLock.unlock();
+        std::printf("[MotorErrorClear] rejected ch=%u id=%u: motor is not enabled by motor_en\n",
+                    static_cast<unsigned>(canCh),
+                    static_cast<unsigned>(canId));
+        TestLogger::instance().logTestResult("motor_error_clear", false, "motor not enabled");
+        sendResponse(&m_lastClient, ProdTestCmd::MOTOR_ERROR_CLEAR, req->header.frame_id,
+                     &out, sizeof(out), out.res);
+        return 0;
+    }
+
+    clearAck = ctrl->clearErrorAndWait(500);
+    if (clearAck) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        errorRead = ctrl->readSdoU16(0x2000, 0x00, out.error_code, 500);
+        out.res = errorRead && out.error_code == 0 ? 0 : -1;
+    }
+    ioLock.unlock();
+
+    if (out.res == 0) {
+        std::printf("[MotorErrorClear] ch=%u id=%u cleared error_code=0x%04X\n",
+                    static_cast<unsigned>(canCh),
+                    static_cast<unsigned>(canId),
+                    out.error_code);
+        TestLogger::instance().logTestResult("motor_error_clear", true, "error cleared");
+    } else {
+        std::printf("[MotorErrorClear] ch=%u id=%u failed ack=%s read=%s error_code=0x%04X\n",
+                    static_cast<unsigned>(canCh),
+                    static_cast<unsigned>(canId),
+                    clearAck ? "yes" : "no",
+                    errorRead ? "yes" : "no",
+                    out.error_code);
+        TestLogger::instance().logTestResult("motor_error_clear", false, "clear failed");
+    }
+
+    sendResponse(&m_lastClient, ProdTestCmd::MOTOR_ERROR_CLEAR, req->header.frame_id,
+                 &out, sizeof(out), out.res);
     return 0;
 }
 
@@ -1324,14 +1393,20 @@ void ProdTestServer::motorTestLoop() {
             haveLastPrintedCmd = true;
         }
 
-        ctrl->command().kp = cmd.kp;
-        ctrl->command().kd = cmd.kd;
-        ctrl->command().position = cmd.position;
-        ctrl->command().velocity = cmd.velocity;
-        ctrl->command().torque = cmd.torque;
-        ctrl->sendControl();
+        bool feedbackReceived = false;
+        {
+            std::lock_guard<std::mutex> ioLock(m_motorIoMutex);
+            ctrl->command().kp = cmd.kp;
+            ctrl->command().kd = cmd.kd;
+            ctrl->command().position = cmd.position;
+            ctrl->command().velocity = cmd.velocity;
+            ctrl->command().torque = cmd.torque;
+            if (ctrl->sendControl()) {
+                feedbackReceived = ctrl->receiveAndDecodeFeedback(kMotorFeedbackPollTimeoutMs);
+            }
+        }
 
-        if (ctrl->receiveAndDecodeFeedback(kMotorFeedbackPollTimeoutMs)) {
+        if (feedbackReceived) {
             const auto& fb = ctrl->getFeedback();
             out.res = 1;
             out.position = fb.position.load();

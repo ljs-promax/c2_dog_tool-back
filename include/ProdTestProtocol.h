@@ -64,6 +64,7 @@ static constexpr uint16_t MOTOR_NTC_READ      = 0x1007; // NTC温度读取
 static constexpr uint16_t MOTOR_ENCODER_ZERO  = 0x1008; // 编码器当前位置标零
 static constexpr uint16_t MOTOR_OTA_UPGRADE   = 0x1009; // 关节驱动器OTA升级
 static constexpr uint16_t MOTOR_ID_CHANGE     = 0x100A; // 关节驱动器ID修改
+static constexpr uint16_t MOTOR_ERROR_CLEAR   = 0x100B; // 清除关节驱动器错误
  
 // ---------- 主控盒相关 (0x1100-0x11FF) ----------
 static constexpr uint16_t MAINCTRL_VERSION    = 0x1100;  // 查询主控盒MCU版本
@@ -107,6 +108,7 @@ static constexpr uint16_t MOTOR_NTC_ACK         = 0x2007;  // NTC读取结果
 static constexpr uint16_t MOTOR_ENCODER_ZERO_ACK = 0x2008; // 编码器标零结果
 static constexpr uint16_t MOTOR_OTA_ACK          = 0x2009; // 关节驱动器OTA结果
 static constexpr uint16_t MOTOR_ID_CHANGE_ACK    = 0x200A; // 关节驱动器ID修改结果
+static constexpr uint16_t MOTOR_ERROR_CLEAR_ACK  = 0x200B; // 驱动器清错结果
 
 static constexpr uint16_t MAINCTRL_VERSION_ACK = 0x2100;  // MCU版本查询结果
 static constexpr uint16_t MAINCTRL_SENSOR_ACK  = 0x2101;  // 传感器状态结果
@@ -331,6 +333,12 @@ typedef struct {
 typedef struct {
     int8_t  res;
 } MotorDisableResponse;
+
+// 驱动器清错响应
+typedef struct {
+    int8_t   res;
+    uint16_t error_code;
+} MotorErrorClearResponse;
 
 // 电机参数响应
 typedef struct {

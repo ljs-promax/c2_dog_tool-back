@@ -225,14 +225,11 @@ void JointControl::decodeErrorCode(const Net2CanFrameWrapper &f, uint16_t &error
         error_code = 0xFFFF; // 无效值
     }
 }
-// ==============================
-// 对照官方：使能帧
-// ==============================
-Net2CanFrameWrapper JointControl::makeEnableFrame(bool on) {
+Net2CanFrameWrapper JointControl::makeControlWordFrame(uint16_t controlWord) {
     Net2CanFrameWrapper f{};
     f.header.board_id       = id_.board_id;
     f.header.can_ch         = id_.can_ch;
-    f.header.id             = id_.can_id + 0x600; // ✅ 官方 SDO 偏移
+    f.header.id             = id_.can_id + 0x600;
     f.header.bitrate_switch = cfg_.bitrate_switch;
     f.header.canfd_frame    = cfg_.canfd;
     f.header.remote_frame   = 0;
@@ -245,36 +242,23 @@ Net2CanFrameWrapper JointControl::makeEnableFrame(bool on) {
     f.data[ 1 ] = 0x02;
     f.data[ 2 ] = 0x20;
     f.data[ 3 ] = 0x00;
-    f.data[ 4 ] = on ? 0x01 : 0x02;
-    f.data[ 5 ] = 0x00;
+    f.data[ 4 ] = static_cast<uint8_t>(controlWord & 0xFF);
+    f.data[ 5 ] = static_cast<uint8_t>((controlWord >> 8) & 0xFF);
     f.data[ 6 ] = 0x00;
     f.data[ 7 ] = 0x00;
 
     return f;
 }
+
+// ==============================
+// 对照官方：使能帧
+// ==============================
+Net2CanFrameWrapper JointControl::makeEnableFrame(bool on) {
+    return makeControlWordFrame(on ? 0x0001 : 0x0002);
+}
+
 Net2CanFrameWrapper JointControl::makeEncoderCalcFrame() {
-    Net2CanFrameWrapper f{};
-    f.header.board_id       = id_.board_id;
-    f.header.can_ch         = id_.can_ch;
-    f.header.id             = id_.can_id + 0x600; // ✅ 官方 SDO 偏移
-    f.header.bitrate_switch = cfg_.bitrate_switch;
-    f.header.canfd_frame    = cfg_.canfd;
-    f.header.remote_frame   = 0;
-    f.header.extend_id      = cfg_.extend_id;
-
-    const uint8_t len = 8;
-    f.header.dlc      = lenToDlc(len);
-
-    f.data[ 0 ] = 0x2B;
-    f.data[ 1 ] = 0x02;
-    f.data[ 2 ] = 0x20;
-    f.data[ 3 ] = 0x00;
-    f.data[ 4 ] = 0xF1;
-    f.data[ 5 ] = 0x00;
-    f.data[ 6 ] = 0x00;
-    f.data[ 7 ] = 0x00;
-
-    return f;
+    return makeControlWordFrame(0x00F1);
 }
 
 Net2CanFrameWrapper JointControl::makeEncoderZeroFrame() {
@@ -390,6 +374,8 @@ void JointControl::decodeFeedback(const Net2CanFrameWrapper &f) {
         uint16_t error_code;
         std::memcpy(&error_code, &f.data[ 16 ], 2);
         fb_.error_code.store(error_code, std::memory_order_relaxed);
+    } else if (L >= 16) {
+        fb_.error_code.store(0, std::memory_order_relaxed);
     }
 }
 
@@ -924,6 +910,24 @@ bool JointControl::enableAndWait(bool on, int timeoutMs) {
         return false;
     }
     auto pkt = encodeBatch({makeEnableFrame(on)});
+    if (!m_network->send(pkt.data(), pkt.size())) {
+        return false;
+    }
+    return receiveSdoAck(0x2002, 0x00, timeoutMs);
+}
+
+bool JointControl::clearErrorAndWait(int timeoutMs) {
+    if (!m_network) {
+        return false;
+    }
+
+    while (takeCachedSdoAck(0x2002, 0x00)) {
+    }
+    drainPendingPackets(32, 0);
+    while (takeCachedSdoAck(0x2002, 0x00)) {
+    }
+
+    auto pkt = encodeBatch({makeControlWordFrame(0x00FF)});
     if (!m_network->send(pkt.data(), pkt.size())) {
         return false;
     }
